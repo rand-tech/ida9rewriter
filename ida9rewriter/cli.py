@@ -1,6 +1,7 @@
 import argparse
 import difflib
 import sys
+import os
 
 from ida9rewriter.codemods.replace_complex import bump_ida_complex
 from ida9rewriter.codemods.replace_simple import bump_ida_simple
@@ -33,9 +34,10 @@ def cli():
     parser.add_argument("-r", "--recursive", action="store_true", help="Recursively rewrite all Python files in the directory", default=False)
 
     args = parser.parse_args()
+    if os.path.isdir(args.source) and not args.recursive:
+        print(f"Error: {args.source} is a directory. Use -r/--recursive to rewrite all Python files in the directory.", file=sys.stderr)
+        exit(1)
     if args.recursive:
-        import os
-
         for root, _, files in os.walk(args.source):
             for file in files:
                 if file.endswith(".py"):
