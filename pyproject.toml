@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "ida9rewriter"
+version = "0.1.0"
+description = ""
+authors = ["random <54098069+rand-tech@users.noreply.github.com>"]
+readme = "README.md"
+
+[tool.poetry.scripts]
+ida9rewriter = "ida9rewriter.cli:cli"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+libcst = "^1.4.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
