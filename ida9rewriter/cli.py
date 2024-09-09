@@ -30,7 +30,7 @@ def run(file: str, is_dryrun: bool):
 def cli():
     parser = argparse.ArgumentParser(description="Rewrite IDA Pro API calls")
     parser.add_argument("source", help="Path to the source file/directory")
-    parser.add_argument("-d", "--dryrun", action="store_true", help="Print the updated code without saving it", default=True)
+    parser.add_argument("-d", "--dryrun", action="store_true", help="Print the updated code without saving it", default=False)
     parser.add_argument("-r", "--recursive", action="store_true", help="Recursively rewrite all Python files in the directory", default=False)
 
     args = parser.parse_args()
