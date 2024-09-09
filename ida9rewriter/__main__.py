@@ -1,4 +1,4 @@
-from .cli import cli
+from ida9rewriter.cli import cli
 
 
 def main():

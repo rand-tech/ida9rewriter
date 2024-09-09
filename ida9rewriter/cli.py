@@ -2,8 +2,8 @@ import argparse
 import difflib
 import sys
 
-from codemods.replace_complex import bump_ida_complex
-from codemods.replace_simple import bump_ida_simple
+from ida9rewriter.codemods.replace_complex import bump_ida_complex
+from ida9rewriter.codemods.replace_simple import bump_ida_simple
 
 
 def bump_ida(source_code: str) -> str:
@@ -13,7 +13,7 @@ def bump_ida(source_code: str) -> str:
     return source_code
 
 
-def run(file: str, is_dryrun):
+def run(file: str, is_dryrun: bool):
     with open(file, "r") as f:
         source_code = f.read()
 
