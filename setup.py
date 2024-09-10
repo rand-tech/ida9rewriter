@@ -10,7 +10,6 @@ setup(
     version="0.1.0",
     author="rand0m",
     author_email="54098069+rand-tech@users.noreply.github.com",
-    # from 8.* to 9.0 (include the 8)
     description="A tool to update IDA Python scripts to IDA 9.0+",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -20,7 +19,7 @@ setup(
         "Programming Language :: Python :: 3",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.11",
+    python_requires=">=3.10",
     install_requires=requirements,
     entry_points={
         "console_scripts": [
