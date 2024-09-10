@@ -40,6 +40,8 @@ CONFIG = {
     "idaapi:get_inf_structure:procname": "ida_ida:inf_get_procname",
     "idaapi:get_inf_structure:max_ea": "ida_ida:inf_get_max_ea",
     "idaapi:get_inf_structure:min_ea": "ida_ida:inf_get_min_ea",
+    "idaapi:get_inf_structure:filetype": "ida_ida:inf_get_filetype",
+    "idaapi:get_inf_structure:lflags": "ida_ida:inf_get_lflags",
 }
 
 ################################################################################
