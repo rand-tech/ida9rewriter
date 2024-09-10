@@ -84,6 +84,8 @@ REPLACEMENTS = {
     "idaapi.is_align_insn": "ida_ida.is_align_insn",
     "idaapi.get_item_head": "idc.get_item_head",
     "idaapi.del_items": "idc.del_items",
+    # diaphora
+    "idc.get_ordinal_qty": "idaapi.get_ordinal_count",
 }
 
 ################################################################################
