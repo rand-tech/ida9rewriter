@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ida9rewriter"
-version = "0.1.0"
+version = "0.2.0"
 description = ""
 authors = ["random <54098069+rand-tech@users.noreply.github.com>"]
 readme = "README.md"

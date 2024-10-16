@@ -7,7 +7,7 @@ with open("requirements.txt", "r", encoding="utf-8") as f:
 
 setup(
     name="ida9rewriter",
-    version="0.1.0",
+    version="0.2.0",
     author="rand0m",
     author_email="54098069+rand-tech@users.noreply.github.com",
     description="A tool to update IDA Python scripts to IDA 9.0+",
