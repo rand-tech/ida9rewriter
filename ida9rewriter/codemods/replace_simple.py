@@ -86,6 +86,11 @@ REPLACEMENTS = {
     "idaapi.del_items": "idc.del_items",
     # diaphora
     "idc.get_ordinal_qty": "idaapi.get_ordinal_count",
+    #
+    "ida_dirtree.DIRTREE_STRUCTS": "ida_dirtree.DIRTREE_LOCAL_TYPES",
+    "ida_dirtree.DIRTREE_ENUMS": "ida_dirtree.DIRTREE_LOCAL_TYPES",
+    "ida_dirtree.DIRTREE_STRUCTS_BOOKMARKS": "ida_dirtree.DIRTREE_LTYPES_BOOKMARKS",
+    "ida_dirtree.DIRTREE_ENUMS_BOOKMARKS": "ida_dirtree.DIRTREE_LTYPES_BOOKMARKS",
 }
 
 ################################################################################
