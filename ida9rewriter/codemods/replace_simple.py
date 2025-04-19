@@ -1,5 +1,6 @@
 import os
 import sys
+from typing import List, Set, Dict, Tuple
 
 import libcst as cst
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
@@ -94,63 +95,221 @@ REPLACEMENTS = {
 }
 
 ################################################################################
-
-
 class IDAAPIUpdater(VisitorBasedCodemodCommand):
     def __init__(self, context: CodemodContext):
         super().__init__(context)
-        self.import_aliases = {}
-        self.glob_imports = set()
+        self.import_aliases = {}         # alias → full module (e.g. "idc")
+        self.import_from_names = {}      # imported name → full module.name
+        self.glob_imports: Set[str] = set()
+        self.required_imports: Set[str] = set()
+        self.existing_imports: Set[str] = set()  # Track which modules are already imported
+        self.used_names: Set[str] = set()  # Track all names used in the code
+
+        self.module_functions_used = {}    # module → set of functions used
+        self.module_functions_replaced = {} # module → set of functions replaced
+
+        self.star_imported_funcs_replaced: Dict[str, Set[str]] = {}  # module → set of star-imported func names replaced
 
     def visit_Import(self, node: cst.Import) -> None:
         for alias in node.names:
-            asname = alias.asname.name.value if alias.asname else alias.name.value
-            self.import_aliases[asname] = alias.name.value
+            module_name = alias.name.value
+            asname = alias.asname.name.value if alias.asname else module_name
+            self.import_aliases[asname] = module_name
+            self.existing_imports.add(module_name)
 
     def visit_ImportFrom(self, node: cst.ImportFrom) -> None:
-        module_name = self._get_module_name(node.module) if node.module else ''
+        module = ""
+        if node.module:
+            # e.g. "from idc import *" or "from idc import add_struc"
+            module = node.module.value
+            self.existing_imports.add(module)
+
         if isinstance(node.names, cst.ImportStar):
-            self.glob_imports.add(module_name)
+            self.glob_imports.add(module)
         else:
             for alias in node.names:
-                asname = alias.asname.name.value if alias.asname else alias.name.value
-                full_name = f"{module_name}.{alias.name.value}".lstrip('.')
-                self.import_aliases[asname] = full_name
+                name = alias.name.value
+                asname = alias.asname.name.value if alias.asname else name
+                self.import_from_names[asname] = f"{module}.{name}".lstrip(".")
 
-    def leave_Attribute(self, original_node: cst.Attribute, updated_node: cst.Attribute) -> cst.BaseExpression:
-        full_name = self._get_full_name(updated_node)
-        if (new_full_name := REPLACEMENTS.get(full_name)):
-            return self._construct_attribute(new_full_name)
+    def visit_Name(self, node: cst.Name) -> None:
+        self.used_names.add(node.value)
+        if node.value in self.import_from_names:
+            full_name = self.import_from_names[node.value]
+            mod = full_name.split(".", 1)[0]
+            if mod not in self.module_functions_used:
+                self.module_functions_used[mod] = set()
+            self.module_functions_used[mod].add(full_name)
+
+    def leave_Attribute(
+        self, original_node: cst.Attribute, updated_node: cst.Attribute
+    ) -> cst.BaseExpression:
+        full = self._get_full_name(updated_node)
+        if any(
+            key.startswith(full + ".")
+            for key in REPLACEMENTS
+            if key.split(".", 1)[0] == full.split(".", 1)[0]
+        ):
+            return updated_node
+
+        parts = full.split(".")
+        if len(parts) > 1:
+            mod = parts[0]
+            if mod not in self.module_functions_used:
+                self.module_functions_used[mod] = set()
+            self.module_functions_used[mod].add(full)
+
+        if full in REPLACEMENTS:
+            new_full = REPLACEMENTS[full]
+            mod = new_full.split(".", 1)[0]
+            self.required_imports.add(mod)
+
+            orig_mod = full.split(".", 1)[0]
+            if orig_mod not in self.module_functions_replaced:
+                self.module_functions_replaced[orig_mod] = set()
+            self.module_functions_replaced[orig_mod].add(full)
+
+            return self._construct_attribute(new_full)
         return updated_node
 
     def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.Call:
-        full_name = None
+        func_name = None
+        full = None
+
         if isinstance(updated_node.func, cst.Attribute):
-            full_name = self._get_full_name(updated_node.func)
+            full = self._get_full_name(updated_node.func)
         elif isinstance(updated_node.func, cst.Name):
             func_name = updated_node.func.value
-            full_name = self.import_aliases.get(func_name, func_name)
+            self.used_names.add(func_name)
 
-        if (new_func := REPLACEMENTS.get(full_name)):
-            return self._replace_func(updated_node, new_func)
+            if func_name in self.import_from_names:
+                full = self.import_from_names[func_name]
+
+                mod = full.split(".", 1)[0]
+                if mod not in self.module_functions_used:
+                    self.module_functions_used[mod] = set()
+                self.module_functions_used[mod].add(full)
+            else:
+                for mod in self.glob_imports:
+                    potential_full = f"{mod}.{func_name}"
+                    if potential_full in REPLACEMENTS:
+                        full = potential_full
+                        if mod not in self.star_imported_funcs_replaced:
+                            self.star_imported_funcs_replaced[mod] = set()
+                        self.star_imported_funcs_replaced[mod].add(func_name)
+                        break
+
+                if not full:
+                    full = self.import_aliases.get(func_name, func_name)
+
+        if full and (new_full := REPLACEMENTS.get(full)):
+            module = new_full.split(".")[0]
+            self.required_imports.add(module)
+
+            if full:
+                orig_mod = full.split(".", 1)[0]
+                if orig_mod not in self.module_functions_replaced:
+                    self.module_functions_replaced[orig_mod] = set()
+                self.module_functions_replaced[orig_mod].add(full)
+
+            return self._replace_func(updated_node, new_full)
         return updated_node
 
-    def leave_FunctionDef(self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef) -> cst.FunctionDef:
-        if updated_node.name.value == "construct_macro":
-            new_params = [
-                cst.Param(name=cst.Name("self")),
-                cst.Param(name=cst.Name("insn"), annotation=cst.Annotation(cst.Name("insn_t"))),
-                cst.Param(name=cst.Name("enable"), annotation=cst.Annotation(cst.Name("bool"))),
-            ]
-            return updated_node.with_changes(params=cst.Parameters(new_params), returns=cst.Annotation(cst.Name("bool")))
-        return updated_node
+    def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
+        modules_to_keep = set()
+        modules_to_remove = set()
 
-    def _get_module_name(self, module: cst.BaseExpression) -> str:
-        if isinstance(module, cst.Name):
-            return module.value
-        elif isinstance(module, cst.Attribute):
-            return self._get_full_name(module)
-        return ''
+        needed_imports = set(self.required_imports)
+
+        for mod in self.module_functions_used:
+            used_funcs = self.module_functions_used.get(mod, set())
+            replaced_funcs = self.module_functions_replaced.get(mod, set())
+
+            if used_funcs and not used_funcs.issubset(replaced_funcs):
+                modules_to_keep.add(mod)
+            elif used_funcs and used_funcs.issubset(replaced_funcs):
+                modules_to_remove.add(mod)
+
+        for mod in self.glob_imports:
+            if mod in self.star_imported_funcs_replaced and mod not in modules_to_keep:
+                modules_to_remove.add(mod)
+            else:
+                modules_to_keep.add(mod)
+
+        modules_to_keep.update(needed_imports)
+
+        to_add: List[cst.SimpleStatementLine] = []
+        for mod in sorted(needed_imports):
+            if mod not in self.existing_imports:
+                imp = cst.Import([cst.ImportAlias(name=cst.Name(mod))])
+                to_add.append(cst.SimpleStatementLine([imp]))
+
+        filtered_body = []
+        for stmt in updated_node.body:
+            keep_stmt = True
+
+            if isinstance(stmt, cst.SimpleStatementLine) and len(stmt.body) == 1:
+                if isinstance(stmt.body[0], cst.Import):
+                    import_stmt = stmt.body[0]
+                    new_names = []
+
+                    for alias in import_stmt.names:
+                        module_name = alias.name.value
+                        if module_name in modules_to_keep:
+                            new_names.append(alias)
+                        elif module_name in modules_to_remove:
+                            continue
+                        else:
+                            new_names.append(alias)
+                    if not new_names:
+                        keep_stmt = False
+                    elif len(new_names) != len(import_stmt.names):
+                        stmt = stmt.with_changes(
+                            body=[import_stmt.with_changes(names=new_names)]
+                        )
+
+                elif isinstance(stmt.body[0], cst.ImportFrom):
+                    from_import = stmt.body[0]
+                    module_name = from_import.module.value if from_import.module else ""
+
+                    if isinstance(from_import.names, cst.ImportStar):
+                        if module_name in modules_to_remove:
+                            keep_stmt = False
+                    else:
+                        if module_name in modules_to_remove:
+                            keep_stmt = False
+                        else:
+                            new_names = []
+                            for alias in from_import.names:
+                                name = alias.name.value
+                                full_name = f"{module_name}.{name}"
+                                if full_name in REPLACEMENTS:
+                                    print(f'{full_name = }, {full_name in REPLACEMENTS}')
+                                    continue
+                                else:
+                                    new_names.append(alias)
+
+                            if not new_names:
+                                keep_stmt = False
+                            elif len(new_names) != len(from_import.names):
+                                stmt = stmt.with_changes(
+                                    body=[from_import.with_changes(names=new_names)]
+                                )
+
+            if keep_stmt:
+                filtered_body.append(stmt)
+
+        insert_at = 0
+        if (
+            filtered_body
+            and isinstance(filtered_body[0], cst.SimpleStatementLine)
+            and isinstance(filtered_body[0].body[0], cst.Expr)
+            and isinstance(filtered_body[0].body[0].value, cst.SimpleString)
+        ):
+            insert_at = 1
+
+        new_body = filtered_body[:insert_at] + to_add + filtered_body[insert_at:]
+        return updated_node.with_changes(body=new_body)
 
     def _get_full_name(self, node: cst.Attribute|cst.Name) -> str:
         assert isinstance(node, cst.Attribute) or isinstance(node, cst.Name), f"Expected Attribute, got {type(node)} instead"
@@ -159,36 +318,60 @@ class IDAAPIUpdater(VisitorBasedCodemodCommand):
             parts.append(node.attr.value)
             node = node.value
         if isinstance(node, cst.Name):
-            parts.append(node.value)
+            name = node.value
+            parts.append(name)
+            self.used_names.add(name)
         else:
             return ""
-        assert all(isinstance(part, str) for part in parts)
-        full_name = parts[::-1]
-        resolved_first_part = self.import_aliases.get(full_name[0], '.'.join(full_name))
-        if not isinstance(resolved_first_part, str):
-            resolved_first_part = self._get_full_name(resolved_first_part)
-        full_name = [resolved_first_part] + list(full_name)[1:]
-        return '.'.join(full_name)
+        parts.reverse()
+        first = parts[0]
+
+        if first in self.import_aliases:
+            resolved = self.import_aliases[first]
+            parts[0] = resolved
+        elif first in self.import_from_names:
+            full_path = self.import_from_names[first]
+            module_parts = full_path.split(".")
+            parts[0] = module_parts[0]
+            if len(module_parts) > 1:
+                parts.insert(1, module_parts[1])
+
+        return ".".join(parts)
 
     @staticmethod
-    def _construct_attribute(full_name: str) -> cst.BaseExpression:
-        parts = full_name.split(".")
-        node = cst.Name(parts[0])
-        for part in parts[1:]:
-            node = cst.Attribute(value=node, attr=cst.Name(part))
+    def _construct_attribute(full: str) -> cst.BaseExpression:
+        parts = full.split(".")
+        node: cst.BaseExpression = cst.Name(parts[0])
+        for attr in parts[1:]:
+            node = cst.Attribute(value=node, attr=cst.Name(attr))
         return node
 
-    def _replace_func(self, node: cst.Call, new_func: str) -> cst.Call:
-        new_func_node = self._construct_attribute(new_func)
-        return node.with_changes(func=new_func_node)
+    def _replace_func(self, call: cst.Call, full: str) -> cst.Call:
+        # rebuild the .func
+        new_func = self._construct_attribute(full)
+        return call.with_changes(func=new_func)
+
 
 def bump_ida_simple(source_code: str) -> str:
     module = cst.parse_module(source_code)
-    context = CodemodContext()
-    transformer = IDAAPIUpdater(context)
-    modified_module = module.visit(transformer)
-    return modified_module.code
+    transformer = IDAAPIUpdater(CodemodContext())
+    modified = module.visit(transformer)
 
+    code = modified.code
+    lines = code.splitlines()
+
+    last_import_idx = -1
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("import ") or stripped.startswith("from "):
+            last_import_idx = i
+
+    if last_import_idx >= 0 and last_import_idx + 1 < len(lines):
+        if lines[last_import_idx + 1].strip() != "":
+            lines.insert(last_import_idx + 1, "")
+
+    trailing_newline = "\n" if code.endswith("\n") else ""
+    return "\n".join(lines) + trailing_newline
 
 if __name__ == "__main__":
     import argparse
